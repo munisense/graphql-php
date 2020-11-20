@@ -61,6 +61,8 @@ class ReferenceExecutor implements ExecutorImplementation
     /** @var SplObjectStorage */
     private $subFieldCache;
 
+    private static $tracing;
+
     private function __construct(ExecutionContext $context)
     {
         if (! self::$UNDEFINED) {
@@ -477,18 +479,23 @@ class ReferenceExecutor implements ExecutorImplementation
                 $fieldNodes  = $fields[$responseName];
                 $fieldPath   = $path;
                 $fieldPath[] = $responseName;
-                $result      = $this->resolveField($parentType, $rootValue, $fieldNodes, $fieldPath);
+                list($result, $resolveInfo) = $this->resolveField($parentType, $rootValue, $fieldNodes, $fieldPath);
                 if ($result === self::$UNDEFINED) {
                     return $results;
                 }
+                $tracing = self::getTracing();
+
+                $start = $tracing->getTime();
                 $promise = $this->getPromise($result);
                 if ($promise !== null) {
                     return $promise->then(static function ($resolvedResult) use ($responseName, $results) {
                         $results[$responseName] = $resolvedResult;
 
+                        $tracing->record($resolveInfo, $start, $tracing->getTime());
                         return $results;
                     });
                 }
+                $tracing->record($resolveInfo, $start, $tracing->getTime());
                 $results[$responseName] = $result;
 
                 return $results;
@@ -525,7 +532,7 @@ class ReferenceExecutor implements ExecutorImplementation
         $fieldName  = $fieldNode->name->value;
         $fieldDef   = $this->getFieldDef($exeContext->schema, $parentType, $fieldName);
         if ($fieldDef === null) {
-            return self::$UNDEFINED;
+            return [self::$UNDEFINED, self::$UNDEFINED];
         }
         $returnType = $fieldDef->getType();
         // The resolve function's optional 3rd argument is a context value that
@@ -568,7 +575,7 @@ class ReferenceExecutor implements ExecutorImplementation
             $result
         );
 
-        return $result;
+        return [$result, $info];
     }
 
     /**
@@ -1197,12 +1204,23 @@ class ReferenceExecutor implements ExecutorImplementation
         foreach ($fields as $responseName => $fieldNodes) {
             $fieldPath   = $path;
             $fieldPath[] = $responseName;
-            $result      = $this->resolveField($parentType, $rootValue, $fieldNodes, $fieldPath);
+
+            $tracing = self::getTracing();
+            $start = $tracing->getTime();
+            list($result, $resolveInfo) = $this->resolveField($parentType, $rootValue, $fieldNodes, $fieldPath);
             if ($result === self::$UNDEFINED) {
                 continue;
             }
-            if (! $containsPromise && $this->isPromise($result)) {
+            if (! $containsPromise && $p = $this->getPromise($result)) {
                 $containsPromise = true;
+
+                $p->then(function($resolved) use ($resolveInfo, $start) {
+                    $tracing->record($resolveInfo, $start, $tracing->getTime());
+                }, function($error) use ($resolveInfo, $start) {
+                    $tracing->record($resolveInfo, $start, $tracing->getTime());
+                });
+            } else {
+                $tracing->record($resolveInfo, $start, $tracing->getTime());
             }
             $results[$responseName] = $result;
         }
@@ -1311,5 +1329,15 @@ class ReferenceExecutor implements ExecutorImplementation
         }
 
         return $runtimeType;
+    }
+
+    public static function getTracing(): Tracing
+    {
+        if (static::$tracing !== null) {
+            return static::$tracing;
+        }
+
+        static::$tracing = new Tracing();
+        return static::$tracing;
     }
 }
