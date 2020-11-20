@@ -13,6 +13,9 @@
     "ext-json": "*",
     "ext-mbstring": "*"
   },
+  "replace": {
+    "webonyx/graphql-php": "^14.0"
+  },
   "require-dev": {
     "amphp/amp": "^2.3",
     "doctrine/coding-standard": "^6.0",
