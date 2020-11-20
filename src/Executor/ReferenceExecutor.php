@@ -488,14 +488,15 @@ class ReferenceExecutor implements ExecutorImplementation
                 $start = $tracing->getTime();
                 $promise = $this->getPromise($result);
                 if ($promise !== null) {
-                    return $promise->then(static function ($resolvedResult) use ($responseName, $results) {
+                    return $promise->then(static function ($resolvedResult) use ($responseName, $results, $tracing, $resolveInfo, $start) {
                         $results[$responseName] = $resolvedResult;
 
                         $tracing->record($resolveInfo, $start, $tracing->getTime());
                         return $results;
                     });
+                }else {
+                    $tracing->record($resolveInfo, $start, $tracing->getTime());
                 }
-                $tracing->record($resolveInfo, $start, $tracing->getTime());
                 $results[$responseName] = $result;
 
                 return $results;
@@ -1214,9 +1215,9 @@ class ReferenceExecutor implements ExecutorImplementation
             if (! $containsPromise && $p = $this->getPromise($result)) {
                 $containsPromise = true;
 
-                $p->then(function($resolved) use ($resolveInfo, $start) {
+                $p->then(function($resolved) use ($resolveInfo, $start, $tracing) {
                     $tracing->record($resolveInfo, $start, $tracing->getTime());
-                }, function($error) use ($resolveInfo, $start) {
+                }, function($error) use ($resolveInfo, $start, $tracing) {
                     $tracing->record($resolveInfo, $start, $tracing->getTime());
                 });
             } else {
